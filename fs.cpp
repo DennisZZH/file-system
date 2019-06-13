@@ -514,7 +514,7 @@ int fs_write(int fildes, void *buf, size_t nbyte){
         return -1;
     }
 
-    int bytes_written = 0;
+    int curr = 0;
     char* name = curr_fd->file_name;
     int offset = curr_fd->file_offset;
     Directory_Node* curr_dn = find_file_by_name(name);
@@ -529,18 +529,18 @@ int fs_write(int fildes, void *buf, size_t nbyte){
         memset(tmp, 0, DATA_BLOCK_SIZE);
         block_read(i + 4096, tmp);
         int read = (BLOCK_SIZE - offset < nbyte) ? BLOCK_SIZE - offset : nbyte; // bytes read
-        memcpy(tmp + offset, (char*) buf + bytes_written, read);
-		bytes_written += read;
+        memcpy(tmp + offset, (char*) buf + curr, read);
+		curr += read;
 		block_write(i + 4096, tmp);
 		offset = 0;
     }
 
     // append extra data blocks
     int block;
-    for(block = find_available_block_in_FAT(); bytes_written < nbyte && block != NO_BLOCK_AVAILABLE; block = find_available_block_in_FAT()){
-        memcpy(tmp, (char*) buf + bytes_written, (bytes < BLOCK_SIZE) ? bytes : BLOCK_SIZE);
+    for(block = find_available_block_in_FAT(); (curr < nbyte) && (block != NO_BLOCK_AVAILABLE); block = find_available_block_in_FAT()){
+        memcpy(tmp, (char*) buf + curr, (bytes < BLOCK_SIZE) ? bytes : BLOCK_SIZE);
 		block_write(block + 4096, tmp);
-		bytes_written += BLOCK_SIZE;
+		curr += BLOCK_SIZE;
 		bytes -= BLOCK_SIZE;
 		add_block_to_FAT(block_entry, block);
 		memset(tmp, 0, BLOCK_SIZE);
@@ -549,7 +549,7 @@ int fs_write(int fildes, void *buf, size_t nbyte){
     curr_fd->file_offset += nbyte;
     curr_dn->file_size = (curr_fd->file_offset < file_size) ? file_size : curr_fd->file_offset;
 
-    return (block == NO_BLOCK_AVAILABLE && bytes_written < nbyte) ? bytes_written : nbyte;
+    return (block == NO_BLOCK_AVAILABLE && curr < nbyte) ? curr : nbyte;
 
 }
 

@@ -4,6 +4,7 @@
 #include "fs.h"
 #include <cstdlib>
 #include <iostream>
+#include <cstring>
 #include <vector>
 #include <list>
 #include <algorithm>
@@ -14,6 +15,7 @@ using namespace std;
 #define MAX_NUM_FILE_DESCRIPTOR 32
 #define NUM_DATA_BLOCK 4096
 #define DATA_BLOCK_SIZE 4096
+#define NO_BLOCK_AVAILABLE
 #define FAT_BLOCK_AVAILABLE -2
 #define FAT_Block_END -1
 #define MAX_LEN_FILE_NAME 15
@@ -25,15 +27,56 @@ static list<File_Descriptor> file_descriptor_list;
 static int numOfFireDescriptor;
 
 
+void add_block_to_FAT(int block_entry, int block){
+    int current = block_entry;
+    while(current_FAT[current] != -1){
+        current = current_FAT[current];
+    }
+    current_FAT[current] = block;
+    current_FAT[block] = -1;
+}
+
+
+int find_available_block_in_FAT(){
+    for(int i = 0; i < NUM_DATA_BLOCK; i++){
+        if(current_FAT[i] == FAT_BLOCK_AVAILABLE){
+            return i;
+        }
+    }
+    return NO_BLOCK_AVAILABLE;
+}
+
+
+int count_block_by_entry(int entry){
+    int current = entry;
+    int count = 0;
+    while(current_FAT[current] != -1){
+        count++;
+        current = current_FAT[current];
+    }
+    return count + 1;
+}
+
+
 int find_block_by_order(int block_entry, int order){
     int current = block_entry;
-    int next;
     for(int i = 0; i < order; i++){
-        next = current_FAT[current];
-        current = next;
+        current = current_FAT[current];
     }
     return current;
 }
+
+
+void free_FAT_by_name(char* name){
+     int entry_block = find_file_by_name(name)->file_FAT_entry;
+     int temp;
+     while(current_FAT[entry_block] != -1){
+         temp = entry_block;
+         entry_block = current_FAT[entry_block];
+         current_FAT[temp] = FAT_BLOCK_AVAILABLE;
+     }
+     current_FAT[entry_block] = FAT_BLOCK_AVAILABLE;
+ }
 
 
 void delete_fildes_by_id(int id){
@@ -66,15 +109,6 @@ void delete_file_by_name(char* name){
 }
 
 
-int find_available_block_in_FAT(){
-    int block;
-    for(int i = 0; i < NUM_DATA_BLOCK; i++){
-        if(current_FAT[i] == FAT_BLOCK_AVAILABLE){
-            return i;
-        }
-    }
-}
-
 
 Directory_Node* find_file_by_name(char* name){
     for(auto i = current_directory_list.begin(); i != current_directory_list.end(); i++){
@@ -84,18 +118,6 @@ Directory_Node* find_file_by_name(char* name){
     }
     return NULL;    // If not found
 }
-
-
- void free_FAT_by_name(char* name){
-     int entry_block = find_file_by_name(name)->file_FAT_entry;
-     int temp;
-     while(current_FAT[entry_block] != -1){
-         temp = entry_block;
-         entry_block = current_FAT[entry_block];
-         current_FAT[temp] = FAT_BLOCK_AVAILABLE;
-     }
-     current_FAT[entry_block] = FAT_BLOCK_AVAILABLE;
- }
 
 
 int write_num_to_buffer(unsigned int num, char* buffer, int offset){
@@ -498,27 +520,36 @@ int fs_write(int fildes, void *buf, size_t nbyte){
     Directory_Node* curr_dn = find_file_by_name(name);
     int block_entry = curr_dn->file_FAT_entry;
     int file_size = curr_dn->file_size;
+    int block_count = count_block_by_entry(block_entry);
+    char tmp[BLOCK_SIZE];
+    int bytes = nbyte;
 
-    for(int cnt = 0, idx = offset; cnt < nbyte; ++cnt, ++idx){
-        unsigned int bn, boff, bid;
-        char buffer[4096];
-
-        if(idx > file_size){
-            // STUB
-        }
-
-        bn = idx / DATA_BLOCK_SIZE;
-        boff = idx % DATA_BLOCK_SIZE;
-
-        bid = find_block_by_order(block_entry, bn);
-
-        char* dst = ((char *) buf) + cnt;
-        *dst = buffer[boff];
-
-        curr_fd->file_offset++;
-        bytes_written++;
+    // start reading from offset data block
+    for(int i = offset / DATA_BLOCK_SIZE; i < block_count; i++){
+        memset(tmp, 0, DATA_BLOCK_SIZE);
+        block_read(i + 4096, tmp);
+        int read = (BLOCK_SIZE - offset < nbyte) ? BLOCK_SIZE - offset : nbyte; // bytes read
+        memcpy(tmp + offset, (char*) buf + bytes_written, read);
+		bytes_written += read;
+		block_write(i + 4096, tmp);
+		offset = 0;
     }
-    return bytes_written;
+
+    // append extra data blocks
+    int block;
+    for(block = find_available_block_in_FAT(); bytes_written < nbyte && block != NO_BLOCK_AVAILABLE; block = find_available_block_in_FAT()){
+        memcpy(tmp, (char*) buf + bytes_written, (bytes < BLOCK_SIZE) ? bytes : BLOCK_SIZE);
+		block_write(block + 4096, tmp);
+		bytes_written += BLOCK_SIZE;
+		bytes -= BLOCK_SIZE;
+		add_block_to_FAT(block_entry, block);
+		memset(tmp, 0, BLOCK_SIZE);
+    }
+
+    curr_fd->file_offset += nbyte;
+    curr_dn->file_size = (curr_fd->file_offset < file_size) ? file_size : curr_fd->file_offset;
+
+    return (block == NO_BLOCK_AVAILABLE && bytes_written < nbyte) ? bytes_written : nbyte;
 
 }
 

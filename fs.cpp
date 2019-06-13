@@ -54,18 +54,6 @@ File_Descriptor* find_fildes_by_id(int id){
     }
     return NULL;    // If not found
 }
-
-
- void free_FAT_by_name(char* name){
-     int entry_block = find_file_by_name(name)->file_FAT_entry;
-     int temp;
-     while(current_FAT[entry_block] != -1){
-         temp = entry_block;
-         entry_block = current_FAT[entry_block];
-         current_FAT[temp] = FAT_BLOCK_AVAILABLE;
-     }
-     current_FAT[entry_block] = FAT_BLOCK_AVAILABLE;
- }
     
 
 void delete_file_by_name(char* name){
@@ -98,13 +86,25 @@ Directory_Node* find_file_by_name(char* name){
 }
 
 
+ void free_FAT_by_name(char* name){
+     int entry_block = find_file_by_name(name)->file_FAT_entry;
+     int temp;
+     while(current_FAT[entry_block] != -1){
+         temp = entry_block;
+         entry_block = current_FAT[entry_block];
+         current_FAT[temp] = FAT_BLOCK_AVAILABLE;
+     }
+     current_FAT[entry_block] = FAT_BLOCK_AVAILABLE;
+ }
+
+
 int write_num_to_buffer(unsigned int num, char* buffer, int offset){
     string s = to_string(num);
-    for(int i = 0; i < s.length; i++){
+    for(int i = 0; i < s.length(); i++){
         buffer[i + offset] = s[i];
     }
-    buffer[s.length + offset] = '\n';
-    return s.length + 1;
+    buffer[s.length() + offset] = '\n';
+    return s.length() + 1;
 }
 
 
@@ -559,4 +559,7 @@ int fs_lseek(int fildes, off_t offset){
 }
 
 
-int fs_truncate(int fildes, off_t length);
+int fs_truncate(int fildes, off_t length){
+    //STUB
+    return 0;
+}

@@ -15,7 +15,7 @@ using namespace std;
 #define MAX_NUM_FILE_DESCRIPTOR 32
 #define NUM_DATA_BLOCK 4096
 #define DATA_BLOCK_SIZE 4096
-#define NO_BLOCK_AVAILABLE
+#define NO_BLOCK_AVAILABLE -3
 #define FAT_BLOCK_AVAILABLE -2
 #define FAT_Block_END -1
 #define MAX_LEN_FILE_NAME 15
@@ -25,6 +25,26 @@ static list<Directory_Node> current_directory_list;
 static int current_FAT[NUM_DATA_BLOCK];
 static list<File_Descriptor> file_descriptor_list;
 static int numOfFireDescriptor;
+
+
+void delete_file_by_name(char* name){
+    for(auto i = current_directory_list.begin(); i != current_directory_list.end(); i++){
+        if(strcmp(i->file_name, name) == 0){
+            current_directory_list.erase(i);
+            return;
+        }
+    }
+}
+
+
+Directory_Node* find_file_by_name(char* name){
+    for(auto i = current_directory_list.begin(); i != current_directory_list.end(); i++){
+        if(strcmp(name, i->file_name) == 0){
+            return &(*i);
+        }
+    }
+    return NULL;    // If not found
+}
 
 
 void add_block_to_FAT(int block_entry, int block){
@@ -67,6 +87,19 @@ int find_block_by_order(int block_entry, int order){
 }
 
 
+void clean_block_start_at_order(int block_entry, int order){
+    int index = find_block_by_order(block_entry, order);
+    int start = current_FAT[index];
+    int temp;
+     while(current_FAT[start] != -1){
+         temp = start;
+         start = current_FAT[start];
+         current_FAT[temp] = FAT_BLOCK_AVAILABLE;
+     }
+     current_FAT[start] = FAT_BLOCK_AVAILABLE;
+}
+
+
 void free_FAT_by_name(char* name){
      int entry_block = find_file_by_name(name)->file_FAT_entry;
      int temp;
@@ -92,27 +125,6 @@ void delete_fildes_by_id(int id){
 File_Descriptor* find_fildes_by_id(int id){
     for(auto i = file_descriptor_list.begin(); i != file_descriptor_list.end(); i++){
         if(id == i->file_id){
-            return &(*i);
-        }
-    }
-    return NULL;    // If not found
-}
-    
-
-void delete_file_by_name(char* name){
-    for(auto i = current_directory_list.begin(); i != current_directory_list.end(); i++){
-        if(strcmp(i->file_name, name) == 0){
-            current_directory_list.erase(i);
-            return;
-        }
-    }
-}
-
-
-
-Directory_Node* find_file_by_name(char* name){
-    for(auto i = current_directory_list.begin(); i != current_directory_list.end(); i++){
-        if(strcmp(name, i->file_name) == 0){
             return &(*i);
         }
     }
@@ -485,7 +497,7 @@ int fs_read(int fildes, void *buf, size_t nbyte){
         unsigned int bn, boff, bid;
         char buffer[4096];
 
-        if(idx > file_size){
+        if(idx >= file_size){
             break;
         }
 
@@ -493,7 +505,7 @@ int fs_read(int fildes, void *buf, size_t nbyte){
         boff = idx % DATA_BLOCK_SIZE;
 
         bid = find_block_by_order(block_entry, bn);
-        block_read(bid, buffer);
+        block_read(bid + 4096, buffer);
 
         char* dst = ((char *) buf) + cnt;
         *dst = buffer[boff];
@@ -506,9 +518,9 @@ int fs_read(int fildes, void *buf, size_t nbyte){
 
 
 int fs_write(int fildes, void *buf, size_t nbyte){
-
+    cout<<111111<<endl;
     File_Descriptor* curr_fd = find_fildes_by_id(fildes);
-
+    cout<<222222<<endl;
     if(curr_fd == NULL){
         perror("fs_write: file descriptor with this id can not be found");
         return -1;
@@ -517,15 +529,21 @@ int fs_write(int fildes, void *buf, size_t nbyte){
     int curr = 0;
     char* name = curr_fd->file_name;
     int offset = curr_fd->file_offset;
+    cout<<"name = "<<name<<endl;
     Directory_Node* curr_dn = find_file_by_name(name);
     int block_entry = curr_dn->file_FAT_entry;
     int file_size = curr_dn->file_size;
     int block_count = count_block_by_entry(block_entry);
     char tmp[BLOCK_SIZE];
     int bytes = nbyte;
-
+    cout<<333333<<endl;
+    cout<<"file size"<<file_size<<endl;
+    cout<<"block entry"<<block_entry<<endl;
+    cout<<"offset = "<<offset<<endl;
+    cout<<"block count = "<<block_count<<endl;
     // start reading from offset data block
     for(int i = offset / DATA_BLOCK_SIZE; i < block_count; i++){
+        cout<<444444<<endl;
         memset(tmp, 0, DATA_BLOCK_SIZE);
         block_read(i + 4096, tmp);
         int read = (BLOCK_SIZE - offset < nbyte) ? BLOCK_SIZE - offset : nbyte; // bytes read
@@ -534,7 +552,7 @@ int fs_write(int fildes, void *buf, size_t nbyte){
 		block_write(i + 4096, tmp);
 		offset = 0;
     }
-
+    cout<<777777<<endl;
     // append extra data blocks
     int block;
     for(block = find_available_block_in_FAT(); (curr < nbyte) && (block != NO_BLOCK_AVAILABLE); block = find_available_block_in_FAT()){
@@ -545,11 +563,11 @@ int fs_write(int fildes, void *buf, size_t nbyte){
 		add_block_to_FAT(block_entry, block);
 		memset(tmp, 0, BLOCK_SIZE);
     }
-
+    cout<<101010<<endl;
     curr_fd->file_offset += nbyte;
     curr_dn->file_size = (curr_fd->file_offset < file_size) ? file_size : curr_fd->file_offset;
-
-    return (block == NO_BLOCK_AVAILABLE && curr < nbyte) ? curr : nbyte;
+    cout<<121212<<endl;
+    return (block == NO_BLOCK_AVAILABLE) && (curr < nbyte) ? curr : nbyte;
 
 }
 
@@ -591,6 +609,33 @@ int fs_lseek(int fildes, off_t offset){
 
 
 int fs_truncate(int fildes, off_t length){
-    //STUB
-    return 0;
+    
+    File_Descriptor* curr_fd = find_fildes_by_id(fildes);
+
+    if(curr_fd == NULL){
+        perror("fs_truncate: file descriptor with this id can not be found");
+        return -1;
+    }
+
+    Directory_Node* curr_dn = find_file_by_name(curr_fd->file_name);
+
+    if(length > curr_dn->file_size){
+        perror("fs_truncate: length exceed file size");
+        return -1;
+    }
+
+    int block_entry = curr_dn->file_FAT_entry;
+    int bn = length / DATA_BLOCK_SIZE;
+    int total_block = count_block_by_entry(block_entry);
+
+    curr_dn->file_size = length;
+    if(bn + 1 > total_block){
+        clean_block_start_at_order(block_entry, bn + 1);
+    }
+    
+    if(curr_fd->file_offset > length){
+        curr_fd->file_offset = length;
+    }
+
+    return 0;   // If success
 }
